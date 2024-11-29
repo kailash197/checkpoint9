@@ -1,9 +1,12 @@
-<?xml version='1.0' ?><launch>
-    <arg name="obstacle" default="0.0"/>
-    <arg name="degrees" default="0"/>
+<?xml version='1.0'?>
+<launch>
+    <arg name="obstacle" default="0.3"/>
+    <arg name="degrees" default="-90"/>
 
     <node pkg="attach_shelf" exec="pre_approach_node" name="pre_approach_node">
       <param name="obstacle" value="$(var obstacle)"/>
       <param name="degrees" value="$(var degrees)"/>
     </node>
+
+    <include file="$(find-pkg-share attach_shelf)/launch/rviz.launch.py"/>
 </launch>
