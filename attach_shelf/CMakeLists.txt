@@ -32,7 +32,7 @@ ament_target_dependencies(pre_approach_node rclcpp geometry_msgs nav_msgs sensor
 install(TARGETS pre_approach_node
    DESTINATION lib/${PROJECT_NAME}
 )
-install(DIRECTORY launch
+install(DIRECTORY launch rviz
   DESTINATION share/${PROJECT_NAME}/
 )
 
