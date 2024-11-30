@@ -13,6 +13,7 @@ find_package(tf2 REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -30,10 +31,15 @@ add_executable(pre_approach_node src/pre_approach.cpp)
 ament_target_dependencies(pre_approach_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2)
 
 install(TARGETS pre_approach_node
-   DESTINATION lib/${PROJECT_NAME}
+  DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY launch rviz
   DESTINATION share/${PROJECT_NAME}/
+)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/GoToLoading.srv"
+  DEPENDENCIES std_msgs
 )
 
 ament_package()
