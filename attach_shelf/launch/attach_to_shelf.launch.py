@@ -11,6 +11,12 @@ def generate_launch_description():
         DeclareLaunchArgument('final_approach', default_value='true', description='value of the request of the service, attach_to_shelf'),
 
         Node(
+            package='attach_shelf',
+            executable='approach_service_server_node',
+            output='screen'
+        ),
+
+        Node(
             package='attach_shelf',  # Replace with your package name
             executable='pre_approach_v2_node',   # Replace with your executable name
             name='pre_approach_v2_node',
