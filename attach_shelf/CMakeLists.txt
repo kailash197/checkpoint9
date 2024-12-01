@@ -30,9 +30,13 @@ endif()
 add_executable(pre_approach_node src/pre_approach.cpp)
 ament_target_dependencies(pre_approach_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2)
 
-install(TARGETS pre_approach_node
+add_executable(pre_approach_v2_node src/pre_approach_v2.cpp)
+ament_target_dependencies(pre_approach_v2_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2)
+
+install(TARGETS pre_approach_node pre_approach_v2_node
   DESTINATION lib/${PROJECT_NAME}
 )
+
 install(DIRECTORY launch rviz
   DESTINATION share/${PROJECT_NAME}/
 )
