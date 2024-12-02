@@ -79,9 +79,11 @@ class PreApproachV2 : public rclcpp::Node {
    
     void laser_scan_callback(const LaserScan::SharedPtr scan_msg);
     void odom_callback(const Odometry::SharedPtr odom_msg);
-    void timer_callback();
+    void timer_preapproach_callback();
+    void timer_finalapproach_callback();
 
-    TimerBase::SharedPtr timer_;
+    TimerBase::SharedPtr timer_preapproach;
+    TimerBase::SharedPtr timer_finalapproach;
     Subscription<LaserScan>::SharedPtr laser_sub_;
     Subscription<Odometry>::SharedPtr odom_sub_;
     Publisher<Twist>::SharedPtr cmd_pub_;
@@ -138,7 +140,9 @@ PreApproachV2::PreApproachV2(int argc, char *argv[]):Node("pre_approach_v2_node"
         std::bind(&PreApproachV2::odom_callback, this,std::placeholders::_1),
         odom_sub_options);      
     cmd_pub_ = this->create_publisher<Twist>(CMD_TOPIC, QoS(10).best_effort());
-    timer_ = this->create_wall_timer(50ms, std::bind(&PreApproachV2::timer_callback, this), timer_cb_group_);
+    timer_preapproach = this->create_wall_timer(50ms, std::bind(&PreApproachV2::timer_preapproach_callback, this), timer_cb_group_);
+    timer_finalapproach = this->create_wall_timer(50ms, std::bind(&PreApproachV2::timer_finalapproach_callback, this), timer_cb_group_);
+    timer_finalapproach->cancel(); // start later after preapproach is complete
     service_client_ = this->create_client<GoToLoading>(SERVICE_NAME);
     RCLCPP_INFO(this->get_logger(), "PreApproachV2 Node Ready.");
 }
@@ -165,7 +169,7 @@ void PreApproachV2::laser_scan_callback(const LaserScan::SharedPtr scan_msg){
     distance_forward_ /= 10.0;
 }
 
-void PreApproachV2::timer_callback() {
+void PreApproachV2::timer_preapproach_callback() {
     if (!reached_obstacle){
         if (distance_forward_ - obstacle > 0.5) {
             publish_velocity(LINEAR_VEL, 0.0);
@@ -176,26 +180,36 @@ void PreApproachV2::timer_callback() {
             reached_obstacle = true;
             desired_yaw_ = normalize_angle((current_yaw_+ degrees));
             RCLCPP_DEBUG(this->get_logger(), "Distance: %.2f", distance_forward_);
-        }
-        
-    } else {
+            start_rotation = true;
+        }        
+        return;        
+    }
+
+    if (start_rotation){
         if (fabs(desired_yaw_ - current_yaw_) > 0.05){
             publish_velocity(0.0, 2*(desired_yaw_ - current_yaw_));      
         } else if (fabs(desired_yaw_ - current_yaw_) > 0.005){
             publish_velocity(0.0, 0.05);      
-        } else if (final_approach){
-            //call service attach shelf
-            RCLCPP_INFO(this->get_logger(), "Service Request Sent.");
-            send_async_request();
-            final_approach = false;
         } else {
-            // end of node execution
-            RCLCPP_INFO(this->get_logger(), "Shutting down...");
             RCLCPP_DEBUG(this->get_logger(), "Current yaw: %.2f, desired: %.2f",current_yaw_, desired_yaw_);
             publish_velocity(0.0, 0.0);
-            rclcpp::shutdown();
+            start_rotation = false;
         }
+        return;
     }
+
+    if (final_approach){
+        //call service attach shelf
+        RCLCPP_INFO(this->get_logger(), "Service Request Sent.");
+        send_async_request();
+        final_approach = false;
+        timer_preapproach->cancel();
+        timer_finalapproach->reset();
+    } else {
+        // end of node execution
+        RCLCPP_INFO(this->get_logger(), "Shutting down..");
+        rclcpp::shutdown();
+    }    
 }
 
 void PreApproachV2::send_async_request() {
@@ -209,7 +223,7 @@ void PreApproachV2::send_async_request() {
     }
 
     auto request = std::make_shared<GoToLoading::Request>();
-    request->attach_to_shelf = final_approach;
+    request->attach_to_shelf = true;
     auto result_future = service_client_->async_send_request(
         request, std::bind(&PreApproachV2::service_response_callback, this, std::placeholders::_1));
     service_called_ = true;
@@ -219,12 +233,23 @@ void PreApproachV2::service_response_callback(Client<GoToLoading>::SharedFuture 
     auto status = future.wait_for(std::chrono::seconds(1));
     if (status == std::future_status::ready) {
         auto response = future.get();
-        RCLCPP_INFO_ONCE(this->get_logger(), "Service Status: %s", response->complete ? "successful" : "failed");
+        RCLCPP_INFO(this->get_logger(), "Service Status: %s", response->complete ? "successful" : "failed");
         service_done_ = true;
     } else {
         RCLCPP_WARN(this->get_logger(), "Response not ready yet.");
         service_done_ = false;
     }    
+}
+void PreApproachV2::timer_finalapproach_callback() {
+    if(service_done_){
+        //
+        RCLCPP_WARN(this->get_logger(), "Start Final Approach.");
+        service_done_ = false;
+    } else {
+        // end of node execution
+        RCLCPP_INFO(this->get_logger(), "Shutting down...");
+        rclcpp::shutdown();
+    }
 }
 
 void PreApproachV2::publish_velocity(double linear, double angular) {
