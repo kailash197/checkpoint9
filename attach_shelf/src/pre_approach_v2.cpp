@@ -2,6 +2,7 @@
 #include "geometry_msgs/msg/pose2_d.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "attach_shelf/srv/go_to_loading.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/utils.h"
@@ -19,10 +20,12 @@ using LaserScan = sensor_msgs::msg::LaserScan;
 using Twist = geometry_msgs::msg::Twist;
 using Odometry = nav_msgs::msg::Odometry;
 using Pose2D = geometry_msgs::msg::Pose2D;
+using GoToLoading = attach_shelf::srv::GoToLoading;
 
 const string SCAN_TOPIC = "/scan";
 const string ODOM_TOPIC = "/diffbot_base_controller/odom";
 const string CMD_TOPIC = "/diffbot_base_controller/cmd_vel_unstamped";
+const string SERVICE_NAME = "/approach_shelf";
 constexpr double LINEAR_VEL = 0.80;
 
 /* HELPERS */
@@ -83,6 +86,12 @@ class PreApproachV2 : public rclcpp::Node {
     Subscription<Odometry>::SharedPtr odom_sub_;
     Publisher<Twist>::SharedPtr cmd_pub_;
 
+    Client<GoToLoading>::SharedPtr service_client_;
+    bool service_done_ = false;
+    bool service_called_ = false;
+    void send_async_request();
+    void service_response_callback(Client<GoToLoading>::SharedFuture future);
+
     CallbackGroup::SharedPtr timer_cb_group_;
     CallbackGroup::SharedPtr laser_cb_group_;
     CallbackGroup::SharedPtr odom_cb_group_;
@@ -130,6 +139,7 @@ PreApproachV2::PreApproachV2(int argc, char *argv[]):Node("pre_approach_v2_node"
         odom_sub_options);      
     cmd_pub_ = this->create_publisher<Twist>(CMD_TOPIC, QoS(10).best_effort());
     timer_ = this->create_wall_timer(50ms, std::bind(&PreApproachV2::timer_callback, this), timer_cb_group_);
+    service_client_ = this->create_client<GoToLoading>(SERVICE_NAME);
     RCLCPP_INFO(this->get_logger(), "PreApproachV2 Node Ready.");
 }
 
@@ -173,6 +183,11 @@ void PreApproachV2::timer_callback() {
             publish_velocity(0.0, 2*(desired_yaw_ - current_yaw_));      
         } else if (fabs(desired_yaw_ - current_yaw_) > 0.005){
             publish_velocity(0.0, 0.05);      
+        } else if (final_approach){
+            //call service attach shelf
+            RCLCPP_INFO(this->get_logger(), "Service Request Sent.");
+            send_async_request();
+            final_approach = false;
         } else {
             // end of node execution
             RCLCPP_INFO(this->get_logger(), "Shutting down...");
@@ -181,6 +196,35 @@ void PreApproachV2::timer_callback() {
             rclcpp::shutdown();
         }
     }
+}
+
+void PreApproachV2::send_async_request() {
+    while (!service_client_->wait_for_service(1s)) {
+        if (!rclcpp::ok()) {
+            RCLCPP_ERROR(this->get_logger(),
+            "Client interrupted while waiting for service. Terminating...");
+            return;
+        }
+        RCLCPP_INFO(this->get_logger(), "Service Unavailable. Waiting for Service...");
+    }
+
+    auto request = std::make_shared<GoToLoading::Request>();
+    request->attach_to_shelf = final_approach;
+    auto result_future = service_client_->async_send_request(
+        request, std::bind(&PreApproachV2::service_response_callback, this, std::placeholders::_1));
+    service_called_ = true;
+}
+
+void PreApproachV2::service_response_callback(Client<GoToLoading>::SharedFuture future) {
+    auto status = future.wait_for(std::chrono::seconds(1));
+    if (status == std::future_status::ready) {
+        auto response = future.get();
+        RCLCPP_INFO_ONCE(this->get_logger(), "Service Status: %s", response->complete ? "successful" : "failed");
+        service_done_ = true;
+    } else {
+        RCLCPP_WARN(this->get_logger(), "Response not ready yet.");
+        service_done_ = false;
+    }    
 }
 
 void PreApproachV2::publish_velocity(double linear, double angular) {
