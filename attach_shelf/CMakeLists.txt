@@ -32,6 +32,13 @@ ament_target_dependencies(pre_approach_node rclcpp geometry_msgs nav_msgs sensor
 
 add_executable(pre_approach_v2_node src/pre_approach_v2.cpp)
 ament_target_dependencies(pre_approach_v2_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2)
+rosidl_get_typesupport_target(
+  TARGET pre_approach_v2_node
+  ${PROJECT_NAME} "rosidl_typesupport_cpp"
+)
+target_link_libraries(
+  pre_approach_v2_node
+  ${PROJECT_NAME}__rosidl_typesupport_cpp)
 
 add_executable(approach_service_server_node src/approach_service_server.cpp)
 ament_target_dependencies(approach_service_server_node rclcpp std_msgs)
