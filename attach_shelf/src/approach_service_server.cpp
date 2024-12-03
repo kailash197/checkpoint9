@@ -3,23 +3,28 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "attach_shelf/srv/go_to_loading.hpp"
 #include <algorithm> //std::find_if()
+#include "tf2_ros/transform_broadcaster.h"
 
 using namespace rclcpp;
 using namespace std;
 using namespace std::chrono_literals;
 using namespace std::placeholders;
+using namespace tf2_ros;
 
 using LaserScan = sensor_msgs::msg::LaserScan;
 using Twist = geometry_msgs::msg::Twist;
 // using Odometry = nav_msgs::msg::Odometry;
 using GoToLoading = attach_shelf::srv::GoToLoading;
 using Groups = std::vector<std::tuple<size_t, size_t, std::pair<double, double>>>;
+using TransformStamped = geometry_msgs::msg::TransformStamped;
 
 const string SCAN_TOPIC = "/scan";
 const string CMD_TOPIC = "/diffbot_base_controller/cmd_vel_unstamped";
 const string SERVICE_NAME = "/approach_shelf";
 constexpr double LINEAR_VEL = 0.80;
 constexpr float INTENSITY_THRESHOLD = 7000;
+const string TARGET_FRAME = "robot_front_laser_base_link";
+const string SOURCE_FRAME = "cart_frame";
 
 class AppoarchServiceServerNode : public Node {
     private:
@@ -31,6 +36,8 @@ class AppoarchServiceServerNode : public Node {
         CallbackGroup::SharedPtr laser_cb_group_;
         void laser_scan_callback(const LaserScan::SharedPtr scan_msg);
         Groups find_midpoint_intensity_groups(const LaserScan::SharedPtr scan_msg,float threshold);
+        std::unique_ptr<TransformBroadcaster> cart_tf_broadcaster_;
+        TransformStamped cart_transform_;
     public:
         AppoarchServiceServerNode():Node("approach_shelf_server_node"){
             server_ = this->create_service<GoToLoading>(
@@ -42,6 +49,9 @@ class AppoarchServiceServerNode : public Node {
                 SCAN_TOPIC, QoS(10).best_effort(),
                 std::bind(&AppoarchServiceServerNode::laser_scan_callback, this, _1),
                 laser_sub_options);
+            cart_tf_broadcaster_ = std::make_unique<TransformBroadcaster>(*this);
+            cart_transform_.header.frame_id = TARGET_FRAME;
+            cart_transform_.child_frame_id = SOURCE_FRAME;
             RCLCPP_INFO(this->get_logger(), "Service Server Ready.");
         }
 };
@@ -83,6 +93,18 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         double cart_x = (std::get<2>(groups[0]).first + std::get<2>(groups[1]).first)/2.0;
         double cart_y = (std::get<2>(groups[0]).second + std::get<2>(groups[1]).second)/2.0;
         RCLCPP_INFO(this->get_logger(), "Cart position: (%.2f, %.2f)", cart_x, cart_y);
+
+        cart_transform_.header.stamp = this->get_clock()->now();
+        cart_transform_.transform.translation.x = cart_x;
+        cart_transform_.transform.translation.y = cart_y;
+        cart_transform_.transform.translation.z = 0.0;
+        cart_transform_.transform.rotation.x = 0.0;
+        cart_transform_.transform.rotation.y = 0.0;
+        cart_transform_.transform.rotation.z = 0.0;
+        cart_transform_.transform.rotation.w = 1.0;
+
+        cart_tf_broadcaster_->sendTransform(cart_transform_);
+
     }        
 }
 
