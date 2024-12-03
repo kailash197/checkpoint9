@@ -43,6 +43,8 @@ class AppoarchServiceServerNode : public Node {
         TransformStamped cart_transform_;
         Buffer tf_buffer_;
         TransformListener tf_listener_;
+        bool found_both_legs_=false;
+        Publisher<Twist>::SharedPtr cmd_vel_pub_;
     public:
         AppoarchServiceServerNode():Node("approach_shelf_server_node"),
         tf_buffer_(this->get_clock()),
@@ -74,29 +76,71 @@ void AppoarchServiceServerNode::service_callback(
         RCLCPP_INFO(this->get_logger(), "Service Request Received.");
         bool attach_to_shelf = request->attach_to_shelf;
         //i. publish cart_frame transform, in both cases
-
-        if (attach_to_shelf){
-            // perform final approach
-            
-            //ii. move robot underneathe the shelf
-            //iii. lift the shelf
-
+        if (found_both_legs_){
+            cart_tf_broadcaster_->sendTransform(cart_transform_);
         } else {
+            // False: if the laser only detects 1 shelf leg or none
+            response->complete = false;
+            RCLCPP_INFO(get_logger(), "Service Completed.");
+            return;
+        }
+        if (attach_to_shelf){
+            //perform final approach
+            //i. move robot underneathe the shelf
+            // Calculate distance
+            double dx = cart_transform_.transform.translation.x;
+            double dy = cart_transform_.transform.translation.y;
+            double dz = cart_transform_.transform.translation.z;
+            double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+            // Calculate angle (rotation about Z-axis)
+            double yaw = atan2(dy, dx);
+
+            // assign velocities
+            double kp_distance = 1.0;
+            double kp_yaw = 1.0;
+            double linear_vel = 0.0;
+            double angular_vel = 0.0;
+
+            Twist cmd_vel_;
+
+            while (distance > 0.01){
+                if(distance > 1.0 ){
+                    kp_distance = 1.0;
+                    kp_yaw = 1.0;
+                } else {
+                    kp_distance = 0.5;
+                    kp_yaw=0.5;
+                }
+                if (fabs(yaw) > M_PI / 6.0){
+                    kp_distance *= 0.5;
+                    kp_yaw *= 1.2;
+                }
+
+                linear_vel = kp_distance * distance;
+                angular_vel = kp_yaw * yaw;
+                cmd_vel_.linear.x = linear_vel;
+                cmd_vel_.angular.z = angular_vel;
+                this->cmd_vel_pub_->publish(cmd_vel_);
+            }
+            cmd_vel_.linear.x = 0.0;
+            cmd_vel_.angular.z = 0.0;
+            this->cmd_vel_pub_->publish(cmd_vel_);
+
+            //move 30cm further
+            //ii. lift the shelf
 
         }
+
         // True: only if the final approach is successful
-        // False: if the laser only detects 1 shelf leg or none
-        response->complete = true;       
-    RCLCPP_INFO(this->get_logger(), "Service Completed.");
+        response->complete = true;
+        RCLCPP_INFO(this->get_logger(), "Service Completed.");
 }
 
 void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr scan_msg){
     auto groups = find_midpoint_intensity_groups(scan_msg, INTENSITY_THRESHOLD);
-    int nof_groups = groups.size();
-    if (nof_groups != 2){
-
-    } else {
-        // Both legs detected
+    found_both_legs_ = (groups.size() == 2 );
+    if (found_both_legs_){
         double cart_x = (std::get<2>(groups[0]).first + std::get<2>(groups[1]).first)/2.0;
         double cart_y = (std::get<2>(groups[0]).second + std::get<2>(groups[1]).second)/2.0;
         RCLCPP_INFO(this->get_logger(), "Cart position: (%.2f, %.2f)", cart_x, cart_y);
@@ -107,7 +151,7 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         TransformStamped transform;
         try {
             transform = tf_buffer_.lookupTransform(
-                REFERENCE_FRAME, // the frame to which data should be transformed
+                REFERENCE_FRAME,
                 TARGET_FRAME,
                 tf2::TimePointZero);
         } catch (const tf2::TransformException &ex) {
@@ -122,9 +166,6 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         cart_transform_.transform.rotation.y = 0.0;
         cart_transform_.transform.rotation.z = 0.0;
         cart_transform_.transform.rotation.w = 1.0;
-
-        cart_tf_broadcaster_->sendTransform(cart_transform_);
-
     }        
 }
 
