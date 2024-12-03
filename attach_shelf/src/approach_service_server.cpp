@@ -75,11 +75,15 @@ void AppoarchServiceServerNode::service_callback(
 
 void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr scan_msg){
     auto groups = find_midpoint_intensity_groups(scan_msg, INTENSITY_THRESHOLD);
+    int nof_groups = groups.size();
+    if (nof_groups != 2){
 
-        for (auto group : groups){
-            auto [first, last, midpoint] = group;
-            RCLCPP_DEBUG(get_logger(), "Start: %ld, end: %ld, midpoint: (%.2f, %.2f)", first, last, midpoint.first, midpoint.second);
-        }
+    } else {
+        // Both legs detected
+        double cart_x = (std::get<2>(groups[0]).first + std::get<2>(groups[1]).first)/2.0;
+        double cart_y = (std::get<2>(groups[0]).second + std::get<2>(groups[1]).second)/2.0;
+        RCLCPP_INFO(this->get_logger(), "Cart position: (%.2f, %.2f)", cart_x, cart_y);
+    }        
 }
 
 Groups AppoarchServiceServerNode::find_midpoint_intensity_groups(const LaserScan::SharedPtr scan_msg,float threshold ) {
