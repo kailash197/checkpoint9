@@ -4,6 +4,8 @@
 #include "attach_shelf/srv/go_to_loading.hpp"
 #include <algorithm> //std::find_if()
 #include "tf2_ros/transform_broadcaster.h"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 using namespace rclcpp;
 using namespace std;
@@ -25,6 +27,7 @@ constexpr double LINEAR_VEL = 0.80;
 constexpr float INTENSITY_THRESHOLD = 7000;
 const string TARGET_FRAME = "robot_front_laser_base_link";
 const string SOURCE_FRAME = "cart_frame";
+const string REFERENCE_FRAME = "odom";
 
 class AppoarchServiceServerNode : public Node {
     private:
@@ -38,8 +41,12 @@ class AppoarchServiceServerNode : public Node {
         Groups find_midpoint_intensity_groups(const LaserScan::SharedPtr scan_msg,float threshold);
         std::unique_ptr<TransformBroadcaster> cart_tf_broadcaster_;
         TransformStamped cart_transform_;
+        Buffer tf_buffer_;
+        TransformListener tf_listener_;
     public:
-        AppoarchServiceServerNode():Node("approach_shelf_server_node"){
+        AppoarchServiceServerNode():Node("approach_shelf_server_node"),
+        tf_buffer_(this->get_clock()),
+        tf_listener_(tf_buffer_){
             server_ = this->create_service<GoToLoading>(
                 SERVICE_NAME,
                 std::bind(&AppoarchServiceServerNode::service_callback, this, _1, _2));
@@ -93,8 +100,21 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         double cart_x = (std::get<2>(groups[0]).first + std::get<2>(groups[1]).first)/2.0;
         double cart_y = (std::get<2>(groups[0]).second + std::get<2>(groups[1]).second)/2.0;
         RCLCPP_INFO(this->get_logger(), "Cart position: (%.2f, %.2f)", cart_x, cart_y);
-
-        cart_transform_.header.stamp = this->get_clock()->now();
+        /*
+        fix Waiting for transform odom ->  cart_frame
+        Lookup would require extrapolation into the past
+        */
+        TransformStamped transform;
+        try {
+            transform = tf_buffer_.lookupTransform(
+                REFERENCE_FRAME, // the frame to which data should be transformed
+                TARGET_FRAME,
+                tf2::TimePointZero);
+        } catch (const tf2::TransformException &ex) {
+            RCLCPP_WARN(this->get_logger(), "Could not get transform: %s", ex.what());
+            return;
+        }
+        cart_transform_.header.stamp = transform.header.stamp;
         cart_transform_.transform.translation.x = cart_x;
         cart_transform_.transform.translation.y = cart_y;
         cart_transform_.transform.translation.z = 0.0;
