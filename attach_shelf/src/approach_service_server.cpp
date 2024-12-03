@@ -1,11 +1,13 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "attach_shelf/srv/go_to_loading.hpp"
 #include <algorithm> //std::find_if()
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
+#include "tf2/utils.h"
 
 using namespace rclcpp;
 using namespace std;
@@ -15,7 +17,7 @@ using namespace tf2_ros;
 
 using LaserScan = sensor_msgs::msg::LaserScan;
 using Twist = geometry_msgs::msg::Twist;
-// using Odometry = nav_msgs::msg::Odometry;
+using Odometry = nav_msgs::msg::Odometry;
 using GoToLoading = attach_shelf::srv::GoToLoading;
 using Groups = std::vector<std::tuple<size_t, size_t, std::pair<double, double>>>;
 using TransformStamped = geometry_msgs::msg::TransformStamped;
@@ -28,6 +30,7 @@ constexpr float INTENSITY_THRESHOLD = 7000;
 const string TARGET_FRAME = "robot_front_laser_base_link";
 const string SOURCE_FRAME = "cart_frame";
 const string REFERENCE_FRAME = "odom";
+const string ODOM_TOPIC = "/diffbot_base_controller/odom";
 
 class AppoarchServiceServerNode : public Node {
     private:
@@ -43,6 +46,11 @@ class AppoarchServiceServerNode : public Node {
         TransformStamped cart_transform_;
         Buffer tf_buffer_;
         TransformListener tf_listener_;
+        bool found_both_legs_=false;
+        Publisher<Twist>::SharedPtr cmd_vel_pub_;
+        Subscription<Odometry>::SharedPtr odom_sub_;
+        void odom_callback(const Odometry::SharedPtr odom_msg);
+        CallbackGroup::SharedPtr odom_cb_group_;
     public:
         AppoarchServiceServerNode():Node("approach_shelf_server_node"),
         tf_buffer_(this->get_clock()),
@@ -59,9 +67,20 @@ class AppoarchServiceServerNode : public Node {
             cart_tf_broadcaster_ = std::make_unique<TransformBroadcaster>(*this);
             cart_transform_.header.frame_id = TARGET_FRAME;
             cart_transform_.child_frame_id = SOURCE_FRAME;
+            cmd_vel_pub_ = this->create_publisher<Twist>(CMD_TOPIC, QoS(10).best_effort());
+            odom_cb_group_ = this->create_callback_group(CallbackGroupType::MutuallyExclusive);
+            auto odom_sub_options = SubscriptionOptions(); odom_sub_options.callback_group = odom_cb_group_;
+            odom_sub_ = this->create_subscription<Odometry>(
+                ODOM_TOPIC, QoS(10).reliable(),
+                std::bind(&AppoarchServiceServerNode::odom_callback, this,_1),
+                odom_sub_options);
             RCLCPP_INFO(this->get_logger(), "Service Server Ready.");
         }
 };
+
+void AppoarchServiceServerNode::odom_callback(const Odometry::SharedPtr odom_msg) {
+    RCLCPP_DEBUG(get_logger(), "Inside ODOM Callback");
+}
 
 void AppoarchServiceServerNode::service_callback(
     const std::shared_ptr<GoToLoading::Request> request,
@@ -74,32 +93,63 @@ void AppoarchServiceServerNode::service_callback(
         RCLCPP_INFO(this->get_logger(), "Service Request Received.");
         bool attach_to_shelf = request->attach_to_shelf;
         //i. publish cart_frame transform, in both cases
-
-        if (attach_to_shelf){
-            // perform final approach
-            
-            //ii. move robot underneathe the shelf
-            //iii. lift the shelf
-
+        if (found_both_legs_){
+            cart_tf_broadcaster_->sendTransform(cart_transform_);
         } else {
+            // False: if the laser only detects 1 shelf leg or none
+            response->complete = false;
+        }
+        if (attach_to_shelf){
+            RCLCPP_INFO(this->get_logger(), "State: Attach to shelf.");
+            //perform final approach
+            //i. move robot underneathe the shelf
+            // Calculate distance
+            double dx = cart_transform_.transform.translation.x;
+            double dy = cart_transform_.transform.translation.y;
+            double dz = cart_transform_.transform.translation.z;
+            double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+            // Calculate angle (rotation about Z-axis)
+            double yaw = atan2(dy, dx);
+
+            Twist cmd_vel_;
+
+            while (rclcpp::ok() && distance > 0.15){
+                cmd_vel_.linear.x = 0.30;
+                cmd_vel_.angular.z = yaw/2.0;
+                this->cmd_vel_pub_->publish(cmd_vel_);
+
+                dx = cart_transform_.transform.translation.x;
+                dy = cart_transform_.transform.translation.y;
+                dz = cart_transform_.transform.translation.z;
+                distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+                yaw = atan2(dy, dx);
+                RCLCPP_DEBUG(get_logger(), "Distance to cart TF: %.4fm", distance);
+            }
+            cmd_vel_.linear.x = 0.0;
+            cmd_vel_.angular.z = 0.0;
+            this->cmd_vel_pub_->publish(cmd_vel_);
+
+            //move 30cm further
+            RCLCPP_INFO(this->get_logger(), "State: Move forward 30cm.");
+            //ii. lift the shelf
+            RCLCPP_INFO(this->get_logger(), "State: Lift the shelf.");
 
         }
+
         // True: only if the final approach is successful
-        // False: if the laser only detects 1 shelf leg or none
-        response->complete = true;       
-    RCLCPP_INFO(this->get_logger(), "Service Completed.");
+        response->complete = true;
+        RCLCPP_INFO(this->get_logger(), "Service Completed.");
 }
 
 void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr scan_msg){
+    RCLCPP_DEBUG(get_logger(), "Inside LASER Callback");
     auto groups = find_midpoint_intensity_groups(scan_msg, INTENSITY_THRESHOLD);
-    int nof_groups = groups.size();
-    if (nof_groups != 2){
-
-    } else {
-        // Both legs detected
+    found_both_legs_ = (groups.size() == 2 );
+    if (found_both_legs_){
         double cart_x = (std::get<2>(groups[0]).first + std::get<2>(groups[1]).first)/2.0;
         double cart_y = (std::get<2>(groups[0]).second + std::get<2>(groups[1]).second)/2.0;
-        RCLCPP_INFO(this->get_logger(), "Cart position: (%.2f, %.2f)", cart_x, cart_y);
+        RCLCPP_DEBUG(this->get_logger(), "Cart position: (%.2f, %.2f)", cart_x, cart_y);
         /*
         fix Waiting for transform odom ->  cart_frame
         Lookup would require extrapolation into the past
@@ -107,7 +157,7 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         TransformStamped transform;
         try {
             transform = tf_buffer_.lookupTransform(
-                REFERENCE_FRAME, // the frame to which data should be transformed
+                REFERENCE_FRAME,
                 TARGET_FRAME,
                 tf2::TimePointZero);
         } catch (const tf2::TransformException &ex) {
@@ -122,9 +172,6 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         cart_transform_.transform.rotation.y = 0.0;
         cart_transform_.transform.rotation.z = 0.0;
         cart_transform_.transform.rotation.w = 1.0;
-
-        cart_tf_broadcaster_->sendTransform(cart_transform_);
-
     }        
 }
 
@@ -164,7 +211,10 @@ Groups AppoarchServiceServerNode::find_midpoint_intensity_groups(const LaserScan
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<AppoarchServiceServerNode>());
+  auto node = std::make_shared<AppoarchServiceServerNode>();
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }

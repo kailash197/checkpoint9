@@ -80,17 +80,15 @@ class PreApproachV2 : public rclcpp::Node {
     void laser_scan_callback(const LaserScan::SharedPtr scan_msg);
     void odom_callback(const Odometry::SharedPtr odom_msg);
     void timer_preapproach_callback();
-    void timer_finalapproach_callback();
 
     TimerBase::SharedPtr timer_preapproach;
-    TimerBase::SharedPtr timer_finalapproach;
     Subscription<LaserScan>::SharedPtr laser_sub_;
     Subscription<Odometry>::SharedPtr odom_sub_;
     Publisher<Twist>::SharedPtr cmd_pub_;
 
     Client<GoToLoading>::SharedPtr service_client_;
     bool service_done_ = false;
-    bool service_called_ = false;
+    bool service_requested_ = false;
     void send_async_request();
     void service_response_callback(Client<GoToLoading>::SharedFuture future);
 
@@ -141,8 +139,6 @@ PreApproachV2::PreApproachV2(int argc, char *argv[]):Node("pre_approach_v2_node"
         odom_sub_options);      
     cmd_pub_ = this->create_publisher<Twist>(CMD_TOPIC, QoS(10).best_effort());
     timer_preapproach = this->create_wall_timer(50ms, std::bind(&PreApproachV2::timer_preapproach_callback, this), timer_cb_group_);
-    timer_finalapproach = this->create_wall_timer(50ms, std::bind(&PreApproachV2::timer_finalapproach_callback, this), timer_cb_group_);
-    timer_finalapproach->cancel(); // start later after preapproach is complete
     service_client_ = this->create_client<GoToLoading>(SERVICE_NAME);
     RCLCPP_INFO(this->get_logger(), "PreApproachV2 Node Ready.");
 }
@@ -198,14 +194,16 @@ void PreApproachV2::timer_preapproach_callback() {
         return;
     }
 
-    if (final_approach){
+    if (final_approach && !service_requested_){
         //call service attach shelf
         RCLCPP_INFO(this->get_logger(), "Service Request Sent.");
         send_async_request();
-        final_approach = false;
-        timer_preapproach->cancel();
-        timer_finalapproach->reset();
-    } else {
+        service_requested_ = true;
+
+        // timer_finalapproach->reset();
+    } 
+    
+    if (service_done_){
         // end of node execution
         RCLCPP_INFO(this->get_logger(), "Shutting down..");
         rclcpp::shutdown();
@@ -226,7 +224,6 @@ void PreApproachV2::send_async_request() {
     request->attach_to_shelf = true;
     auto result_future = service_client_->async_send_request(
         request, std::bind(&PreApproachV2::service_response_callback, this, std::placeholders::_1));
-    service_called_ = true;
 }
 
 void PreApproachV2::service_response_callback(Client<GoToLoading>::SharedFuture future) {
@@ -239,17 +236,6 @@ void PreApproachV2::service_response_callback(Client<GoToLoading>::SharedFuture 
         RCLCPP_WARN(this->get_logger(), "Response not ready yet.");
         service_done_ = false;
     }    
-}
-void PreApproachV2::timer_finalapproach_callback() {
-    if(service_done_){
-        //
-        RCLCPP_WARN(this->get_logger(), "Start Final Approach.");
-        service_done_ = false;
-    } else {
-        // end of node execution
-        RCLCPP_INFO(this->get_logger(), "Shutting down...");
-        rclcpp::shutdown();
-    }
 }
 
 void PreApproachV2::publish_velocity(double linear, double angular) {
