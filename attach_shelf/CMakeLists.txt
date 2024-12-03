@@ -41,7 +41,7 @@ target_link_libraries(
   ${PROJECT_NAME}__rosidl_typesupport_cpp)
 
 add_executable(approach_service_server_node src/approach_service_server.cpp)
-ament_target_dependencies(approach_service_server_node rclcpp std_msgs)
+ament_target_dependencies(approach_service_server_node rclcpp geometry_msgs sensor_msgs std_msgs)
 rosidl_get_typesupport_target(
   TARGET approach_service_server_node
   ${PROJECT_NAME} "rosidl_typesupport_cpp"
