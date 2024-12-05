@@ -180,7 +180,6 @@ void PreApproachV2::timer_preapproach_callback() {
         }        
         return;        
     }
-
     if (start_rotation){
         if (fabs(desired_yaw_ - current_yaw_) > 0.05){
             publish_velocity(0.0, 2*(desired_yaw_ - current_yaw_));      
@@ -194,20 +193,20 @@ void PreApproachV2::timer_preapproach_callback() {
         return;
     }
 
-    if (final_approach && !service_requested_){
+    if (final_approach) {
+        if (!service_requested_){
         //call service attach shelf
         RCLCPP_INFO(this->get_logger(), "Service Request Sent.");
         send_async_request();
         service_requested_ = true;
-
-        // timer_finalapproach->reset();
-    } 
-    
-    if (service_done_){
-        // end of node execution
-        RCLCPP_INFO(this->get_logger(), "Shutting down..");
-        rclcpp::shutdown();
-    }    
+        }
+        if (!service_done_) {
+            return;
+        }
+    }
+    // end of node execution
+    RCLCPP_INFO(this->get_logger(), "Shutting down..");
+    rclcpp::shutdown();
 }
 
 void PreApproachV2::send_async_request() {

@@ -1,5 +1,6 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/pose2_d.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "attach_shelf/srv/go_to_loading.hpp"
@@ -21,6 +22,7 @@ using Odometry = nav_msgs::msg::Odometry;
 using GoToLoading = attach_shelf::srv::GoToLoading;
 using Groups = std::vector<std::tuple<size_t, size_t, std::pair<double, double>>>;
 using TransformStamped = geometry_msgs::msg::TransformStamped;
+using Pose2D = geometry_msgs::msg::Pose2D;
 
 const string SCAN_TOPIC = "/scan";
 const string CMD_TOPIC = "/diffbot_base_controller/cmd_vel_unstamped";
@@ -31,6 +33,14 @@ const string TARGET_FRAME = "robot_front_laser_base_link";
 const string SOURCE_FRAME = "cart_frame";
 const string REFERENCE_FRAME = "odom";
 const string ODOM_TOPIC = "/diffbot_base_controller/odom";
+constexpr double DISTANCE_FORWARD = 0.30; //meters
+
+// Function to normalize angle to [-PI, PI]
+double normalize_angle(double angle) {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
 
 class AppoarchServiceServerNode : public Node {
     private:
@@ -51,7 +61,9 @@ class AppoarchServiceServerNode : public Node {
         Subscription<Odometry>::SharedPtr odom_sub_;
         void odom_callback(const Odometry::SharedPtr odom_msg);
         CallbackGroup::SharedPtr odom_cb_group_;
+        Pose2D current_pos_;
     public:
+        void publish_velocity(double linear, double angular);
         AppoarchServiceServerNode():Node("approach_shelf_server_node"),
         tf_buffer_(this->get_clock()),
         tf_listener_(tf_buffer_){
@@ -80,6 +92,15 @@ class AppoarchServiceServerNode : public Node {
 
 void AppoarchServiceServerNode::odom_callback(const Odometry::SharedPtr odom_msg) {
     RCLCPP_DEBUG(get_logger(), "Inside ODOM Callback");
+    tf2::Quaternion q(
+        odom_msg->pose.pose.orientation.x,
+        odom_msg->pose.pose.orientation.y,
+        odom_msg->pose.pose.orientation.z,
+        odom_msg->pose.pose.orientation.w);
+
+    current_pos_.x = odom_msg->pose.pose.position.x;
+    current_pos_.y = odom_msg->pose.pose.position.y;
+    current_pos_.theta = normalize_angle(tf2::getYaw(q));
 }
 
 void AppoarchServiceServerNode::service_callback(
@@ -98,6 +119,8 @@ void AppoarchServiceServerNode::service_callback(
         } else {
             // False: if the laser only detects 1 shelf leg or none
             response->complete = false;
+            RCLCPP_INFO(this->get_logger(), "Service Completed.");
+            return;
         }
         if (attach_to_shelf){
             RCLCPP_INFO(this->get_logger(), "State: Attach to shelf.");
@@ -115,9 +138,7 @@ void AppoarchServiceServerNode::service_callback(
             Twist cmd_vel_;
 
             while (rclcpp::ok() && distance > 0.15){
-                cmd_vel_.linear.x = 0.30;
-                cmd_vel_.angular.z = yaw/2.0;
-                this->cmd_vel_pub_->publish(cmd_vel_);
+                publish_velocity(0.30, 0.4 * yaw);
 
                 dx = cart_transform_.transform.translation.x;
                 dy = cart_transform_.transform.translation.y;
@@ -126,12 +147,29 @@ void AppoarchServiceServerNode::service_callback(
                 yaw = atan2(dy, dx);
                 RCLCPP_DEBUG(get_logger(), "Distance to cart TF: %.4fm", distance);
             }
-            cmd_vel_.linear.x = 0.0;
-            cmd_vel_.angular.z = 0.0;
-            this->cmd_vel_pub_->publish(cmd_vel_);
+            publish_velocity(0.0, 0.0);
 
             //move 30cm further
             RCLCPP_INFO(this->get_logger(), "State: Move forward 30cm.");
+            rclcpp::sleep_for(100ms);
+            yaw = current_pos_.theta;
+            double x_target = current_pos_.x + DISTANCE_FORWARD * cos(yaw);
+            double y_target = current_pos_.y + DISTANCE_FORWARD * sin(yaw);
+            dx = x_target;
+            dy = y_target;
+            distance = std::sqrt(dx * dx + dy * dy);
+
+            while (distance > 0.01){
+                publish_velocity(0.10, 0.0);
+                //update
+                yaw = current_pos_.theta;
+                dx = x_target - current_pos_.x;
+                dy = y_target - current_pos_.y;
+                distance = std::sqrt(dx * dx + dy * dy);
+                RCLCPP_INFO(this->get_logger(), "Distance: %.2f.", distance);
+            }
+            publish_velocity(0.0, 0.0);
+
             //ii. lift the shelf
             RCLCPP_INFO(this->get_logger(), "State: Lift the shelf.");
 
@@ -154,17 +192,17 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         fix Waiting for transform odom ->  cart_frame
         Lookup would require extrapolation into the past
         */
+        cart_transform_.header.stamp = this->get_clock()->now();
         TransformStamped transform;
         try {
             transform = tf_buffer_.lookupTransform(
                 REFERENCE_FRAME,
                 TARGET_FRAME,
                 tf2::TimePointZero);
+            cart_transform_.header.stamp = transform.header.stamp;
         } catch (const tf2::TransformException &ex) {
             RCLCPP_WARN(this->get_logger(), "Could not get transform: %s", ex.what());
-            return;
         }
-        cart_transform_.header.stamp = transform.header.stamp;
         cart_transform_.transform.translation.x = cart_x;
         cart_transform_.transform.translation.y = cart_y;
         cart_transform_.transform.translation.z = 0.0;
@@ -206,6 +244,14 @@ Groups AppoarchServiceServerNode::find_midpoint_intensity_groups(const LaserScan
         }
     }
     return groups;
+}
+
+void AppoarchServiceServerNode::publish_velocity(double linear, double angular) {
+    auto cmd_msg = Twist();
+    cmd_msg.linear.x = linear;
+    cmd_msg.angular.z = angular;
+    cmd_vel_pub_->publish(cmd_msg);
+    rclcpp::sleep_for(std::chrono::milliseconds(20));
 }
 
 int main(int argc, char * argv[])
