@@ -3,6 +3,7 @@
 #include "geometry_msgs/msg/pose2_d.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "attach_shelf/srv/go_to_loading.hpp"
 #include <algorithm> //std::find_if()
 #include "tf2_ros/transform_broadcaster.h"
@@ -34,6 +35,7 @@ const string SOURCE_FRAME = "cart_frame";
 const string REFERENCE_FRAME = "odom";
 const string ODOM_TOPIC = "/diffbot_base_controller/odom";
 constexpr double DISTANCE_FORWARD = 0.30; //meters
+const string ELEVATOR_UP_TOPIC = "/elevator_up";
 
 // Function to normalize angle to [-PI, PI]
 double normalize_angle(double angle) {
@@ -62,6 +64,7 @@ class AppoarchServiceServerNode : public Node {
         void odom_callback(const Odometry::SharedPtr odom_msg);
         CallbackGroup::SharedPtr odom_cb_group_;
         Pose2D current_pos_;
+        Publisher<std_msgs::msg::String>::SharedPtr elevator_up_pub_;
     public:
         void publish_velocity(double linear, double angular);
         AppoarchServiceServerNode():Node("approach_shelf_server_node"),
@@ -86,6 +89,7 @@ class AppoarchServiceServerNode : public Node {
                 ODOM_TOPIC, QoS(10).reliable(),
                 std::bind(&AppoarchServiceServerNode::odom_callback, this,_1),
                 odom_sub_options);
+            elevator_up_pub_ = create_publisher<std_msgs::msg::String>(ELEVATOR_UP_TOPIC, QoS(10).reliable());
             RCLCPP_INFO(this->get_logger(), "Service Server Ready.");
         }
 };
@@ -166,13 +170,13 @@ void AppoarchServiceServerNode::service_callback(
                 dx = x_target - current_pos_.x;
                 dy = y_target - current_pos_.y;
                 distance = std::sqrt(dx * dx + dy * dy);
-                RCLCPP_INFO(this->get_logger(), "Distance: %.2f.", distance);
+                RCLCPP_DEBUG(this->get_logger(), "Distance: %.2f.", distance);
             }
             publish_velocity(0.0, 0.0);
 
             //ii. lift the shelf
             RCLCPP_INFO(this->get_logger(), "State: Lift the shelf.");
-
+            elevator_up_pub_->publish(std_msgs::msg::String());
         }
 
         // True: only if the final approach is successful
