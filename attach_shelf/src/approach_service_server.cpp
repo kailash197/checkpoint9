@@ -28,13 +28,13 @@ using Pose2D = geometry_msgs::msg::Pose2D;
 const string SCAN_TOPIC = "/scan";
 const string CMD_TOPIC = "/diffbot_base_controller/cmd_vel_unstamped";
 const string SERVICE_NAME = "/approach_shelf";
-constexpr double LINEAR_VEL = 0.80;
+constexpr double LINEAR_VEL = 0.50;
 constexpr float INTENSITY_THRESHOLD = 7000;
 const string TARGET_FRAME = "robot_front_laser_base_link";
 const string SOURCE_FRAME = "cart_frame";
 const string REFERENCE_FRAME = "odom";
 const string ODOM_TOPIC = "/diffbot_base_controller/odom";
-constexpr double DISTANCE_FORWARD = 0.30; //meters
+constexpr double DISTANCE_FORWARD = 0.65; //meters
 const string ELEVATOR_UP_TOPIC = "/elevator_up";
 
 // Function to normalize angle to [-PI, PI]
@@ -118,9 +118,7 @@ void AppoarchServiceServerNode::service_callback(
         RCLCPP_INFO(this->get_logger(), "Service Request Received.");
         bool attach_to_shelf = request->attach_to_shelf;
         //i. publish cart_frame transform, in both cases
-        if (found_both_legs_){
-            cart_tf_broadcaster_->sendTransform(cart_transform_);
-        } else {
+        if (!found_both_legs_){
             // False: if the laser only detects 1 shelf leg or none
             response->complete = false;
             RCLCPP_INFO(this->get_logger(), "Service Completed.");
@@ -154,7 +152,7 @@ void AppoarchServiceServerNode::service_callback(
             publish_velocity(0.0, 0.0);
 
             //move 30cm further
-            RCLCPP_INFO(this->get_logger(), "State: Move forward 30cm.");
+            RCLCPP_INFO(this->get_logger(), "State: Move forward.");
             rclcpp::sleep_for(100ms);
             yaw = current_pos_.theta;
             double x_target = current_pos_.x + DISTANCE_FORWARD * cos(yaw);
@@ -214,6 +212,7 @@ void AppoarchServiceServerNode::laser_scan_callback(const LaserScan::SharedPtr s
         cart_transform_.transform.rotation.y = 0.0;
         cart_transform_.transform.rotation.z = 0.0;
         cart_transform_.transform.rotation.w = 1.0;
+        cart_tf_broadcaster_->sendTransform(cart_transform_);
     }        
 }
 

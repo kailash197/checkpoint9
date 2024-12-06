@@ -26,7 +26,7 @@ const string SCAN_TOPIC = "/scan";
 const string ODOM_TOPIC = "/diffbot_base_controller/odom";
 const string CMD_TOPIC = "/diffbot_base_controller/cmd_vel_unstamped";
 const string SERVICE_NAME = "/approach_shelf";
-constexpr double LINEAR_VEL = 0.80;
+constexpr double LINEAR_VEL = 0.50;
 
 /* HELPERS */
 // Function to find index for a given angle and specific points
@@ -184,7 +184,7 @@ void PreApproachV2::timer_preapproach_callback() {
         if (fabs(desired_yaw_ - current_yaw_) > 0.05){
             publish_velocity(0.0, 2*(desired_yaw_ - current_yaw_));      
         } else if (fabs(desired_yaw_ - current_yaw_) > 0.005){
-            publish_velocity(0.0, 0.05);      
+            publish_velocity(0.0, 0.1);
         } else {
             RCLCPP_DEBUG(this->get_logger(), "Current yaw: %.2f, desired: %.2f",current_yaw_, desired_yaw_);
             publish_velocity(0.0, 0.0);

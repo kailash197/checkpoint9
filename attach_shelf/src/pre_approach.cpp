@@ -23,7 +23,7 @@ using Pose2D = geometry_msgs::msg::Pose2D;
 const string SCAN_TOPIC = "/scan";
 const string ODOM_TOPIC = "/diffbot_base_controller/odom";
 const string CMD_TOPIC = "/diffbot_base_controller/cmd_vel_unstamped";
-constexpr double LINEAR_VEL = 0.80;
+constexpr double LINEAR_VEL = 0.50;
 
 /* HELPERS */
 // Function to find index for a given angle and specific points
@@ -167,7 +167,7 @@ void PreApproach::timer_callback() {
         if (fabs(desired_yaw_ - current_yaw_) > 0.05){
             publish_velocity(0.0, 2*(desired_yaw_ - current_yaw_));      
         } else if (fabs(desired_yaw_ - current_yaw_) > 0.005){
-            publish_velocity(0.0, 0.05);      
+            publish_velocity(0.0, 0.1);
         } else {
             // end of node execution
             RCLCPP_INFO(this->get_logger(), "Shutting down...");
