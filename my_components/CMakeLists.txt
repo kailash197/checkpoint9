@@ -48,4 +48,8 @@ install(TARGETS
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 
+install(DIRECTORY rviz
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 ament_package()
