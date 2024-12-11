@@ -1,5 +1,6 @@
 #include "my_components/pre_approach.hpp"
 
+#include "helper_package/helper_functions.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/utils.h"
 
@@ -11,6 +12,7 @@
 #include "std_msgs/msg/string.hpp"
 
 using namespace std::chrono_literals;
+using namespace helper_package;
 
 namespace my_components {
 PreApproach::PreApproach(const rclcpp::NodeOptions &options): Node("pre_approach_node", options) {
