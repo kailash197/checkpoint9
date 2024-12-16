@@ -74,6 +74,16 @@ ament_target_dependencies(attach_server_component
 target_link_libraries(attach_server_component ${attach_server_component_typesupport})
 rclcpp_components_register_nodes(attach_server_component "my_components::AttachServer")
 
+### >> Add Executable: manual_composition
+add_executable(manual_composition src/manual_composition.cpp)
+target_link_libraries(manual_composition attach_server_component)
+ament_target_dependencies(manual_composition rclcpp geometry_msgs tf2_ros)
+
+### >> Installations
+
+install(TARGETS manual_composition
+  DESTINATION lib/${PROJECT_NAME})
+
 install(TARGETS
   preapproach_component
   attach_server_component
