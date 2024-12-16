@@ -42,6 +42,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 # Get ROSIDL typesupport target
 rosidl_get_typesupport_target(attach_server_component_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
+rosidl_get_typesupport_target(attach_client_component_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 ### >> Add Component: preapproach
 add_library(preapproach_component SHARED src/pre_approach.cpp)
@@ -57,6 +58,17 @@ ament_target_dependencies(preapproach_component
   )
 rclcpp_components_register_nodes(preapproach_component "my_components::PreApproach")
 set(node_plugins "${node_plugins}my_components::PreApproach;$<TARGET_FILE:preapproach_component>\n")
+
+### >> Add Component: attach_client
+add_library(attach_client_component SHARED src/attach_client.cpp)
+target_compile_definitions(attach_client_component PRIVATE "COMPOSITION_BUILDING_DLL")
+ament_target_dependencies(attach_client_component
+  "rclcpp"
+  "rclcpp_components"
+  std_msgs
+)
+target_link_libraries(attach_client_component ${attach_client_component_typesupport})
+rclcpp_components_register_nodes(attach_client_component "my_components::AttachClient")
 
 ### >> Add Component: attach_server
 add_library(attach_server_component SHARED src/attach_server.cpp)
@@ -87,6 +99,7 @@ install(TARGETS manual_composition
 install(TARGETS
   preapproach_component
   attach_server_component
+  attach_client_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
