@@ -15,6 +15,7 @@ find_package(tf2 REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(helper_package REQUIRED)
 
@@ -31,6 +32,18 @@ if(BUILD_TESTING)
 endif()
 
 include_directories(include)
+include_directories(${CMAKE_BINARY_DIR}/rosidl_generator_cpp)
+
+# Generate ROSIDL interfaces
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/GoToLoading.srv"
+  DEPENDENCIES std_msgs
+)
+
+# Get ROSIDL typesupport target
+rosidl_get_typesupport_target(attach_server_component_typesupport ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+### >> Add Component: preapproach
 add_library(preapproach_component SHARED src/pre_approach.cpp)
 target_compile_definitions(preapproach_component PRIVATE "COMPOSITION_BUILDING_DLL")
 ament_target_dependencies(preapproach_component
@@ -44,8 +57,26 @@ ament_target_dependencies(preapproach_component
   )
 rclcpp_components_register_nodes(preapproach_component "my_components::PreApproach")
 set(node_plugins "${node_plugins}my_components::PreApproach;$<TARGET_FILE:preapproach_component>\n")
+
+### >> Add Component: attach_server
+add_library(attach_server_component SHARED src/attach_server.cpp)
+target_compile_definitions(attach_server_component PRIVATE "COMPOSITION_BUILDING_DLL")
+ament_target_dependencies(attach_server_component
+  "rclcpp"
+  "rclcpp_components"
+  "geometry_msgs"
+  sensor_msgs
+  nav_msgs
+  tf2
+  tf2_ros
+  helper_package
+)
+target_link_libraries(attach_server_component ${attach_server_component_typesupport})
+rclcpp_components_register_nodes(attach_server_component "my_components::AttachServer")
+
 install(TARGETS
   preapproach_component
+  attach_server_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
